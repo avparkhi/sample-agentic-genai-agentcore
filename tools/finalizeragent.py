@@ -3,9 +3,7 @@ import logging
 from typing import Any, Dict
 from datetime import datetime
 
-from strands import Agent
-from strands.models import BedrockModel
-from strands import tool
+from langchain_aws import ChatBedrock
 from utils.s3 import read_text_from_s3, write_text_to_s3
 from utils.persona_store import get_current_persona_id
 
@@ -29,7 +27,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-@tool
 def finalizer_agent(
     campaign_content: str,
     persona_review: str,
@@ -165,16 +162,17 @@ Generate an updated campaign that incorporates content from all sections above -
 
         # Create Bedrock model instance
         region=os.getenv("AWS_REGION", "us-west-2")
-        #region = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-west-2"))
         model_id = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         logger.info(f"Creating Bedrock model: {model_id}")
         
         try:
-            bedrock_model = BedrockModel(
+            bedrock_model = ChatBedrock(
                 model_id=model_id,
                 region_name=region,
-                temperature=0.4,  # Balanced temperature for strategic synthesis
-                max_tokens=6144
+                model_kwargs={
+                    "temperature": 0.4,  # Balanced temperature for strategic synthesis
+                    "max_tokens": 6144
+                }
             )
         except Exception as e:
             logger.error(f"Failed to create Bedrock model: {str(e)}")
@@ -184,24 +182,8 @@ Generate an updated campaign that incorporates content from all sections above -
                 "execution_summary": "Failed to initialize AI model for synthesis"
             }
 
-        # Create Agent with synthesis system prompt
-        logger.info("Creating finalizer agent")
-        try:
-            finalizer_agent_instance = Agent(
-                model=bedrock_model,
-                system_prompt=system_prompt,
-                tools=[]
-            )
-        except Exception as e:
-            logger.error(f"Failed to create finalizer agent: {str(e)}")
-            return {
-                "status": "error",
-                "error": f"Failed to create finalizer agent: {str(e)}",
-                "execution_summary": "Failed to initialize finalizer agent"
-            }
-
-        # Invoke agent to generate final synthesis
-        logger.info("Invoking agent to generate final synthesis")
+        # Invoke model to generate final synthesis
+        logger.info("Invoking model to generate final synthesis")
         user_prompt = f"""Generate final campaign content that incorporates findings, actions and recommendations from the persona review and validation report in the original content:
 
 <campaign_content>
@@ -219,15 +201,14 @@ Generate an updated campaign that incorporates content from all sections above -
 Provide your comprehensive synthesis following the structured format specified in your instructions. Focus on updating the original content from the persona and validation reviews with the goal to balance audience authenticity with compliance requirements while maximizing campaign effectiveness for EA."""
 
         try:
-            response = finalizer_agent_instance(user_prompt)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            response = bedrock_model.invoke(messages)
             
-            # Handle different response formats
-            if hasattr(response, 'content'):
-                response_text = response.content
-            elif hasattr(response, 'message'):
-                response_text = response.message.get('content', [{}])[0].get('text', str(response.message))
-            else:
-                response_text = str(response)
+            # Extract content from response
+            response_text = response.content if hasattr(response, 'content') else str(response)
             
             if not response_text:
                 logger.error("No text content in model response")

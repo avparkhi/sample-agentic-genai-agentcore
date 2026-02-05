@@ -2,7 +2,7 @@
 """
 # 🎯 Ad Campaign Review Orchestrator Agent
 
-A specialized Strands agent that orchestrates persona-based review, compliance validation, 
+A LangGraph-based orchestrator that coordinates persona-based review, compliance validation, 
 and final synthesis for EA ad campaigns.
 
 ## What This Example Shows
@@ -17,15 +17,35 @@ import os
 import json
 import logging
 import boto3
-from strands import Agent
-from strands.models import BedrockModel
+from typing import Annotated, TypedDict, Sequence
+from utils.s3 import read_text_from_s3, write_text_to_s3
+
+from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
+from langchain_aws import ChatBedrock
+from opentelemetry import baggage 
+from opentelemetry import context as otel_context
+from opentelemetry.instrumentation import auto_instrumentation
+from datetime import datetime
+
+# Import the agent functions (we'll convert them to regular functions)
 from tools.revieweragent import persona_reviewer_agent
 from tools.validatoragent import validator_agent
 from tools.finalizeragent import finalizer_agent
-from utils.s3 import read_text_from_s3, write_text_to_s3
+
+# Import LangGraph hooks
+from lambda.langgraph_hooks import (
+    HookManager,
+    LoggingHook,
+    MemoryHook,
+    MetricsHook,
+    create_hooked_node
+)
+
 
 # Global variable to store current campaign_id for tools
 _current_campaign_id = None
+_instrumentation_initialized = False
 
 def set_current_campaign_id(campaign_id: str):
     """Set the current campaign ID for use by agent tools"""
@@ -37,10 +57,29 @@ def get_current_campaign_id() -> str:
     global _current_campaign_id
     return _current_campaign_id
 
+def set_session_context(session_id: str):
+    """Set session context for OpenTelemetry"""
+    ctx = baggage.set_baggage("session_id", session_id)
+    return otel_context.attach(ctx)
+
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-# Force rebuild timestamp: 2026-01-11 22:15
+LOGGER = logger  # Alias for consistency
+
+# Define the state for the LangGraph workflow
+class CampaignState(TypedDict):
+    """State for the campaign review workflow"""
+    campaign_content: str
+    campaign_id: str
+    franchise: str
+    franchise_type: str
+    version: str
+    persona_review: str
+    validation_report: str
+    final_report: str
+    messages: Sequence[BaseMessage]
+    error: str
 
 # Define the orchestrator system prompt for ad campaign review
 CAMPAIGN_ORCHESTRATOR_PROMPT = """
@@ -52,47 +91,25 @@ Orchestrate a multi-stage review process for ad campaigns that:
 2. Validates legal compliance and brand guideline adherence
 3. Synthesizes feedback into actionable optimization recommendations
 
-# Available Tools
-You have access to three specialized agents:
-
-**persona_reviewer_agent**: Reviews content from authentic human persona perspectives
-- Provides demographic-specific feedback on cultural relevance and authenticity
-- Evaluates emotional connection and representation quality
-- Identifies potential alienation or engagement opportunities
-- Returns persona details, review content, and resonance scoring
-
-**validator_agent**: Validates legal compliance and brand guidelines
-- Ensures adherence to advertising standards and regulations
-- Validates brand voice, tone, and visual identity alignment
-- Assesses risk factors and competitive considerations
-- Returns compliance scoring and critical issue identification
-
-**finalizer_agent**: Synthesizes all feedback into final recommendations
-- Balances persona insights with compliance requirements
-- Prioritizes actions based on business impact and feasibility
-- Creates implementation roadmap with success metrics
-- Returns overall recommendation and priority action items
-
 # Orchestration Protocol
 
-When reviewing an ad campaign, follow this sequence:
+The workflow follows this sequence:
 
 1. **Initiate Persona Review**
-   - Call persona_reviewer_agent with campaign content
+   - Review campaign content from authentic human persona perspectives
    - Capture persona insights and demographic feedback
    - Note any cultural or representation concerns
 
 2. **Conduct Compliance Validation**
-   - Call validator_agent with same campaign content
+   - Validate legal and brand guideline compliance
    - Identify legal and brand guideline issues
    - Document compliance score and critical fixes needed
 
 3. **Synthesize Final Recommendations**
-   - Call finalizer_agent with original content, persona review, and validation results
+   - Combine original content, persona review, and validation results
    - Summarize key findings from the persona review and the validation 
    - Highlight critical actions and recommendations
-   - Generate final campaign content that incorporates these findings, actions and recommendations in the original content
-
+   - Generate final campaign content that incorporates these findings
 
 # Campaign Context
 You are currently reviewing ad campaigns for EA's gaming franchises, with a focus on new sneaker product launches that require authentic audience connection while maintaining EA's brand standards and legal compliance.
@@ -106,29 +123,159 @@ Always provide:
 
 Remember: Your goal is to ensure campaigns resonate authentically with target audiences while meeting all corporate standards and legal requirements."""
 
-def create_campaign_orchestrator() -> Agent:
-    """Create the campaign review orchestrator agent"""
+# Define workflow nodes
+def persona_review_node(state: CampaignState) -> CampaignState:
+    """Node that performs persona-based review"""
+    logger.info("Executing persona review node")
     
-    # Create Bedrock model for orchestrator
-    region=os.getenv("AWS_REGION", "us-west-2")
-    #region = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-west-2"))
-    model_id = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-    
-    bedrock_model = BedrockModel(
-        model_id=model_id,
-        region_name=region,
-        temperature=0.5,
-        max_tokens=4096
+    result = persona_reviewer_agent(
+        campaign_content=state["campaign_content"],
+        campaign_id=state.get("campaign_id"),
+        franchise=state.get("franchise", "EA Sports FC"),
+        franchise_type=state.get("franchise_type", "Sports"),
+        version=state.get("version", "v1")
     )
     
-    # Create orchestrator agent with all tools
-    orchestrator = Agent(
-        model=bedrock_model,
-        system_prompt=CAMPAIGN_ORCHESTRATOR_PROMPT,
-        tools=[persona_reviewer_agent, validator_agent, finalizer_agent],
+    if result["status"] == "success":
+        state["persona_review"] = result["persona_review"]
+        state["messages"].append(AIMessage(content=f"Persona review completed: {result['execution_summary']}"))
+    else:
+        state["error"] = result.get("error", "Persona review failed")
+        state["messages"].append(AIMessage(content=f"Persona review failed: {state['error']}"))
+    
+    return state
+
+def validation_node(state: CampaignState) -> CampaignState:
+    """Node that performs compliance validation"""
+    logger.info("Executing validation node")
+    
+    result = validator_agent(
+        campaign_content=state["campaign_content"],
+        campaign_id=state.get("campaign_id"),
+        franchise=state.get("franchise", "EA Sports FC"),
+        franchise_type=state.get("franchise_type", "Sports"),
+        version=state.get("version", "v1")
     )
     
-    return orchestrator
+    if result["status"] == "success":
+        state["validation_report"] = result["validation_report"]
+        state["messages"].append(AIMessage(content=f"Validation completed: {result['execution_summary']}"))
+    else:
+        state["error"] = result.get("error", "Validation failed")
+        state["messages"].append(AIMessage(content=f"Validation failed: {state['error']}"))
+    
+    return state
+
+def finalizer_node(state: CampaignState) -> CampaignState:
+    """Node that synthesizes final recommendations"""
+    logger.info("Executing finalizer node")
+    
+    # Check if we have the required inputs
+    if not state.get("persona_review") or not state.get("validation_report"):
+        state["error"] = "Missing persona review or validation report"
+        state["messages"].append(AIMessage(content=f"Finalization failed: {state['error']}"))
+        return state
+    
+    result = finalizer_agent(
+        campaign_content=state["campaign_content"],
+        persona_review=state["persona_review"],
+        validation_report=state["validation_report"],
+        campaign_id=state.get("campaign_id"),
+        franchise=state.get("franchise", "EA Sports FC"),
+        franchise_type=state.get("franchise_type", "Sports"),
+        version=state.get("version", "v1")
+    )
+    
+    if result["status"] == "success":
+        state["final_report"] = result["final_report"]
+        state["messages"].append(AIMessage(content=f"Finalization completed: {result['execution_summary']}"))
+    else:
+        state["error"] = result.get("error", "Finalization failed")
+        state["messages"].append(AIMessage(content=f"Finalization failed: {state['error']}"))
+    
+    return state
+
+def should_continue(state: CampaignState) -> str:
+    """Determine if workflow should continue or end"""
+    if state.get("error"):
+        return END
+    
+    # Check which stage we're at based on what's been completed
+    if not state.get("persona_review"):
+        return "persona_review"
+    elif not state.get("validation_report"):
+        return "validation"
+    elif not state.get("final_report"):
+        return "finalizer"
+    else:
+        return END
+
+def create_campaign_orchestrator(
+    session_id: str,
+    actor_id: str = "campaign_user",
+    memory_client=None,
+    memory_id: str = None
+) -> tuple:
+    """
+    Create the campaign review orchestrator workflow using LangGraph
+    
+    Args:
+        session_id: Unique session identifier
+        actor_id: User/actor identifier
+        memory_client: Optional AWS Bedrock AgentCore Memory client
+        memory_id: Optional memory store identifier
+    
+    Returns:
+        Tuple of (compiled_workflow, hook_manager)
+    """
+    
+    # Create hook manager
+    hook_manager = HookManager()
+    
+    # Add logging hook (always enabled)
+    hook_manager.add_hook(LoggingHook(session_id=session_id, actor_id=actor_id))
+    
+    # Add metrics hook (always enabled)
+    hook_manager.add_hook(MetricsHook(session_id=session_id))
+    
+    # Add memory hook if memory is configured
+    if memory_client and memory_id:
+        logger.info(f"[{session_id}] Enabling AgentCore Memory integration")
+        hook_manager.add_hook(MemoryHook(
+            memory_client=memory_client,
+            memory_id=memory_id,
+            session_id=session_id
+        ))
+    
+    # Create the workflow graph
+    workflow = StateGraph(CampaignState)
+    
+    # Wrap nodes with hooks
+    hooked_persona_review = create_hooked_node(
+        persona_review_node, "persona_review", hook_manager
+    )
+    hooked_validation = create_hooked_node(
+        validation_node, "validation", hook_manager
+    )
+    hooked_finalizer = create_hooked_node(
+        finalizer_node, "finalizer", hook_manager
+    )
+    
+    # Add hooked nodes to workflow
+    workflow.add_node("persona_review", hooked_persona_review)
+    workflow.add_node("validation", hooked_validation)
+    workflow.add_node("finalizer", hooked_finalizer)
+    
+    # Define the workflow edges
+    workflow.set_entry_point("persona_review")
+    workflow.add_edge("persona_review", "validation")
+    workflow.add_edge("validation", "finalizer")
+    workflow.add_edge("finalizer", END)
+    
+    # Compile the workflow
+    app = workflow.compile()
+    
+    return app, hook_manager
 
 # Example usage and Lambda handler
 def lambda_handler(event, context):
@@ -149,6 +296,19 @@ def lambda_handler(event, context):
                 },
                 'body': ''
             }
+        
+        global _instrumentation_initialized
+        if not _instrumentation_initialized:
+            auto_instrumentation.initialize()
+            print("Auto instrumentation initialized")
+            _instrumentation_initialized = True
+    
+        # Generate unique session_id for this campaign review
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        session_id = f"campaign-{timestamp}"
+
+        context_token = None
+        context_token = set_session_context(session_id)
         
         # Handle API Gateway event structure
         if 'body' in event:
@@ -216,8 +376,27 @@ def lambda_handler(event, context):
         # Async processing: do the actual work
         campaign_brief_s3_path = s3_key
         
-        # Create orchestrator
-        orchestrator = create_campaign_orchestrator()
+        # Initialize memory if available (optional)
+        memory_client = None
+        memory_id = None
+        try:
+            # Attempt to import and initialize memory
+            from tools.memory_client import get_memory_client, initialize_memory
+            memory_client = get_memory_client()
+            memory_id = initialize_memory()
+            logger.info(f"[{session_id}] AgentCore Memory initialized: {memory_id}")
+        except ImportError:
+            logger.info(f"[{session_id}] AgentCore Memory not available (optional)")
+        except Exception as e:
+            logger.warning(f"[{session_id}] Failed to initialize memory: {e}")
+        
+        # Create orchestrator workflow with hooks
+        orchestrator, hook_manager = create_campaign_orchestrator(
+            session_id=session_id,
+            actor_id="campaign_user",
+            memory_client=memory_client,
+            memory_id=memory_id
+        )
         
         # Set the current campaign ID for tools to use
         set_current_campaign_id(campaign_id)
@@ -263,11 +442,33 @@ def lambda_handler(event, context):
         # Process the request synchronously
         logger.info("Starting campaign review orchestration")
         
-        # Include campaign_id in the prompt so tools can use it
-        prompt_with_campaign_id = f"CAMPAIGN_ID: {campaign_id}\n\n{campaign_prompt}"
+        # Create initial state for the workflow
+        initial_state = {
+            "campaign_content": campaign_prompt,
+            "campaign_id": campaign_id,
+            "franchise": "EA Sports FC",
+            "franchise_type": "Sports",
+            "version": "v1",
+            "persona_review": "",
+            "validation_report": "",
+            "final_report": "",
+            "messages": [HumanMessage(content=f"Review campaign for {campaign_id}")],
+            "error": ""
+        }
         
-        # Execute the orchestration
-        response = orchestrator(prompt_with_campaign_id)
+        # Call workflow start hooks
+        hook_manager.on_workflow_start(initial_state)
+        
+        try:
+            # Execute the orchestration workflow
+            final_state = orchestrator.invoke(initial_state)
+            
+            # Call workflow end hooks
+            hook_manager.on_workflow_end(final_state)
+        except Exception as e:
+            # Call error hooks
+            hook_manager.on_error(e, initial_state)
+            raise
         
         # Update status: complete
         status_data["stage"] = "complete"
@@ -276,16 +477,22 @@ def lambda_handler(event, context):
         
         logger.info("Campaign review orchestration completed successfully")
         
-        # Return the orchestration results
+        # Check for errors
+        if final_state.get("error"):
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': f'Campaign review failed: {final_state["error"]}',
+                    'status': 'failed',
+                    'campaign_id': campaign_id
+                })
+            }
         
-        # Extract response content based on Strands response structure
-        if hasattr(response, 'content'):
-            response_content = response.content
-        elif hasattr(response, 'message'):
-            response_content = response.message.get('content', [{}])[0].get('text', str(response.message))
-        else:
-            response_content = str(response)
-            
+        # Return the orchestration results
         return {
             'statusCode': 200,
             'headers': {
@@ -296,11 +503,9 @@ def lambda_handler(event, context):
                 'message': 'Campaign review completed successfully',
                 'status': 'completed',
                 'campaign_id': campaign_id,
-                'results': response_content,
-                'usage': {
-                    'input_tokens': getattr(response, 'input_tokens', 0) if hasattr(response, 'usage') else 0,
-                    'output_tokens': getattr(response, 'output_tokens', 0) if hasattr(response, 'usage') else 0
-                }
+                'results': final_state.get("final_report", ""),
+                'persona_review': final_state.get("persona_review", ""),
+                'validation_report': final_state.get("validation_report", "")
             })
         }
         
@@ -317,6 +522,10 @@ def lambda_handler(event, context):
                 'type': type(e).__name__
             })
         }
+    finally:
+        if context_token:
+            otel_context.detach(context_token)
+            LOGGER.info(f"Session context detached")
 
 if __name__ == "__main__":
     print("\n🎯 EA Campaign Review Orchestrator 🎯\n")
