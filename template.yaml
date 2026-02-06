@@ -108,7 +108,7 @@ Resources:
         MaxAge: 600
 
   # Campaign Orchestrator Lambda
-  CampaignOrchestratorStrandsFunction:
+  CampaignOrchestratorLanggraphFn:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: campaign-orch-langgraph
@@ -133,7 +133,25 @@ Resources:
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
-              Resource: "*"   
+              Resource: "*"
+            # Bedrock AgentCore Memory permissions
+            - Effect: Allow
+              Action:
+                - bedrock:CreateMemory
+                - bedrock:GetMemory
+                - bedrock:UpdateMemory
+                - bedrock:DeleteMemory
+                - bedrock:ListMemories
+                - bedrock:CreateMemorySession
+                - bedrock:GetMemorySession
+                - bedrock:DeleteMemorySession
+                - bedrock:ListMemorySessions
+                - bedrock:PutMemoryContent
+                - bedrock:GetMemoryContent
+                - bedrock:DeleteMemoryContent
+                - bedrock:QueryMemory
+                - bedrock:SearchMemory
+              Resource: "*"
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
