@@ -50,6 +50,19 @@ def get_current_campaign_id() -> str:
     global _current_campaign_id
     return _current_campaign_id
 
+# Global variable to store bucket name for tools
+_bucket_name = None
+
+def set_bucket_name(bucket_name: str):
+    """Set the bucket name for use by agent tools"""
+    global _bucket_name
+    _bucket_name = bucket_name
+
+def get_bucket_name() -> str:
+    """Get the bucket name"""
+    global _bucket_name
+    return _bucket_name
+
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -163,6 +176,7 @@ def process_campaign_review(payload):
         # Extract parameters from agentcore invocation payload
         campaign_id = payload.get("campaignId", "100")
         s3_key = payload.get("s3Key", "campaign_brief.md")
+        bucket_name = payload.get("bucketName", "unified-campaign-review-test")
         
         if not campaign_id or not s3_key:
             return {
@@ -175,9 +189,6 @@ def process_campaign_review(payload):
                     'error': 'Missing required parameters: campaignId and s3Key'
                 })
             }
-
-        #bucket_name = os.environ.get("CAMPAIGN_BUCKET")
-        bucket_name = payload.get("bucket_name", "campaign_brief.md")
         
         # Async processing: do the actual work
         campaign_brief_s3_path = s3_key
@@ -188,8 +199,9 @@ def process_campaign_review(payload):
             actor_id="campaign_user"
         )
         
-        # Set the current campaign ID for tools to use
+        # Set the current campaign ID and bucket name for tools to use
         set_current_campaign_id(campaign_id)
+        set_bucket_name(bucket_name)
         
         # Read content brief from S3
         logger.info(f"Reading campaign brief from S3: {campaign_brief_s3_path}")

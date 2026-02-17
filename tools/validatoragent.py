@@ -10,17 +10,32 @@ from utils.s3 import read_text_from_s3, write_text_to_s3
 from utils.persona_store import get_current_persona_id
 
 def get_current_campaign_id():
-    """Get the current campaign ID from orchestrator"""
+    """Get the current campaign ID from agent"""
     try:
         import sys
         import os
         sys.path.append(os.path.dirname(os.path.dirname(__file__)))
         # Import using importlib to avoid lambda keyword conflict
         import importlib.util
-        spec = importlib.util.spec_from_file_location("orchestrator", os.path.join(os.path.dirname(os.path.dirname(__file__)), "lambda", "orchestrator.py"))
-        orchestrator_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(orchestrator_module)
-        return orchestrator_module.get_current_campaign_id()
+        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
+        agent_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(agent_module)
+        return agent_module.get_current_campaign_id()
+    except:
+        return None
+
+def get_bucket_name():
+    """Get the bucket name from agent"""
+    try:
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        # Import using importlib to avoid lambda keyword conflict
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
+        agent_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(agent_module)
+        return agent_module.get_bucket_name()
     except:
         return None
 
@@ -244,7 +259,7 @@ Provide your comprehensive validation following the structured format specified 
         # Save validation report to S3 if persona_id is available
         if persona_id:
             try:
-                bucket_name = os.getenv("CAMPAIGN_BUCKET")
+                bucket_name = get_bucket_name() or os.getenv("CAMPAIGN_BUCKET")
                 if bucket_name:
                     current_campaign_id = campaign_id or get_current_campaign_id()
                     if current_campaign_id:
