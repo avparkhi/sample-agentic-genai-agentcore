@@ -11,36 +11,7 @@ from strands.models import BedrockModel
 from strands import tool
 from utils.s3 import read_text_from_s3, write_text_to_s3
 from utils.persona_store import set_current_persona_id
-
-def get_current_campaign_id():
-    """Get the current campaign ID from agent"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        # Import using importlib to avoid lambda keyword conflict
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
-        agent_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(agent_module)
-        return agent_module.get_current_campaign_id()
-    except:
-        return None
-
-def get_bucket_name():
-    """Get the bucket name from agent"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        # Import using importlib to avoid lambda keyword conflict
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
-        agent_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(agent_module)
-        return agent_module.get_bucket_name()
-    except:
-        return None
+from utils.payload_store import get_campaign_id, get_bucket_name
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -86,12 +57,14 @@ def persona_reviewer_agent(
         try:
             # Initialize DynamoDB client
             region = os.getenv("AWS_REGION", "us-west-2")
-            bucket_name = get_bucket_name() or os.environ.get("CAMPAIGN_BUCKET")
+            bucket_name = get_bucket_name() 
+            logger.info(f"Bucket name in reviewer: {bucket_name}")
             dynamodb = boto3.client('dynamodb', region_name=region)
             
             # Generate a random persona_id between 001 and 040
             random_id = random.randint(1, 40)
             persona_id = f"persona_{random_id:03d}"
+            logger.info(f"persona_id in reviewer: {persona_id}")
             
             # Store persona_id in memory for other agents to access
             set_current_persona_id(persona_id)
@@ -319,38 +292,30 @@ Provide your honest, authentic feedback following the structured format specifie
                 "persona_details": persona,
             }
 
-        # Save review to S3 at campaigns/{campaign_id}/reviews/{persona_id}/campaign_review.md
-        current_campaign_id = campaign_id or get_current_campaign_id()
-        if current_campaign_id:
-            review_s3_key = f"campaigns/{current_campaign_id}/reviews/{persona['persona_id']}/campaign_review.md"
-        else:
-            review_s3_key = f"review/{persona['persona_id']}/campaign_review.md"
-        logger.info(f"Saving persona review to S3: {review_s3_key}")
-        
+        # Save review to S3 using persona_id
         try:
-            write_text_to_s3(
-                bucket_name=bucket_name,
-                key=review_s3_key,
-                text_content=response_text,
-                content_type="text/markdown"
-            )
-            logger.info(f"Successfully saved persona review to S3")
-        except PermissionError as e:
-            logger.error(f"Access denied writing persona review to S3: {str(e)}")
-            return {
-                "status": "error",
-                "error": f"Access denied saving persona review to S3",
-                "execution_summary": "Failed to save persona review: access denied",
-                "persona_details": persona,
-            }
+            #bucket_name = get_bucket_name()
+            #logger.info(f"Bucket name in reviewer: {bucket_name}")
+            if bucket_name:
+                current_campaign_id = get_campaign_id()
+                if current_campaign_id:
+                    review_s3_key = f"campaigns/{current_campaign_id}/reviews/{persona['persona_id']}/campaign_review.md"
+                else:
+                    review_s3_key = f"review/{persona['persona_id']}/campaign_review.md"
+                logger.info(f"Saving persona review to S3: {review_s3_key}")
+                
+                write_text_to_s3(
+                    bucket_name=bucket_name,
+                    key=review_s3_key,
+                    text_content=response_text,
+                    content_type="text/markdown"
+                )
+                logger.info(f"Successfully saved persona review to S3")
+            else:
+                logger.warning("CAMPAIGN_BUCKET environment variable not set, skipping S3 save")
         except Exception as e:
-            logger.error(f"Failed to save persona review to S3: {str(e)}")
-            return {
-                "status": "error",
-                "error": f"Failed to save persona review: {str(e)}",
-                "execution_summary": f"Failed to save persona review to S3: {str(e)}",
-                "persona_details": persona,
-            }
+            logger.warning(f"Failed to save persona review to S3: {str(e)}")
+            # Don't fail the entire operation if S3 save fails
 
         # Parse response to extract resonance score
         resonance_score = 7  # Default score, would be parsed from response in production

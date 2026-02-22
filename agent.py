@@ -23,6 +23,7 @@ from tools.revieweragent import persona_reviewer_agent
 from tools.validatoragent import validator_agent
 from tools.finalizeragent import finalizer_agent
 from utils.s3 import read_text_from_s3
+from utils.payload_store import set_campaign_id, set_bucket_name
 
 from tools.memory_client import get_memory_client, initialize_memory
 from tools.memory_hooks import ShortTermMemoryHook
@@ -36,32 +37,6 @@ app = BedrockAgentCoreApp()
 # Initialize memory
 memory_client = get_memory_client()
 memory_id = initialize_memory()
-
-# Global variable to store current campaign_id for tools
-_current_campaign_id = None
-
-def set_current_campaign_id(campaign_id: str):
-    """Set the current campaign ID for use by agent tools"""
-    global _current_campaign_id
-    _current_campaign_id = campaign_id
-
-def get_current_campaign_id() -> str:
-    """Get the current campaign ID"""
-    global _current_campaign_id
-    return _current_campaign_id
-
-# Global variable to store bucket name for tools
-_bucket_name = None
-
-def set_bucket_name(bucket_name: str):
-    """Set the bucket name for use by agent tools"""
-    global _bucket_name
-    _bucket_name = bucket_name
-
-def get_bucket_name() -> str:
-    """Get the bucket name"""
-    global _bucket_name
-    return _bucket_name
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -176,7 +151,7 @@ def process_campaign_review(payload):
         # Extract parameters from agentcore invocation payload
         campaign_id = payload.get("campaignId", "100")
         s3_key = payload.get("s3Key", "campaign_brief.md")
-        bucket_name = payload.get("bucketName", "unified-campaign-review-test")
+        bucket_name = payload.get("bucket_name", "unified-campaign-review-test")
         
         if not campaign_id or not s3_key:
             return {
@@ -199,8 +174,8 @@ def process_campaign_review(payload):
             actor_id="campaign_user"
         )
         
-        # Set the current campaign ID and bucket name for tools to use
-        set_current_campaign_id(campaign_id)
+        # Set the campaign ID and bucket name for tools to use
+        set_campaign_id(campaign_id)
         set_bucket_name(bucket_name)
         
         # Read content brief from S3

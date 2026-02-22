@@ -128,6 +128,36 @@ def ensure_iam_role(region, account_id):
                     )
                     logger.info(f"Added S3 permissions to existing role: {existing_role_name} for bucket: {campaign_bucket}")
                     
+                    # Add DynamoDB permissions for PersonaTable access
+                    dynamodb_policy = {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Action": [
+                                "dynamodb:GetItem",
+                                "dynamodb:PutItem",
+                                "dynamodb:UpdateItem",
+                                "dynamodb:DeleteItem",
+                                "dynamodb:Query",
+                                "dynamodb:Scan",
+                                "dynamodb:BatchGetItem",
+                                "dynamodb:BatchWriteItem",
+                                "dynamodb:DescribeTable"
+                            ],
+                            "Resource": [
+                                f"arn:aws:dynamodb:{region}:{account_id}:table/PersonaTable",
+                                f"arn:aws:dynamodb:{region}:{account_id}:table/PersonaTable/*"
+                            ]
+                        }]
+                    }
+                    
+                    iam_client.put_role_policy(
+                        RoleName=existing_role_name,
+                        PolicyName="AgentCoreDynamoDBAccess",
+                        PolicyDocument=json.dumps(dynamodb_policy)
+                    )
+                    logger.info(f"Added DynamoDB permissions to existing role: {existing_role_name}")
+                    
                     role_arn = role['Arn']
                     role_name = existing_role_name
                     break
@@ -257,6 +287,39 @@ def ensure_iam_role(region, account_id):
             logger.info(f"Added S3 permissions to role for bucket: {campaign_bucket}")
         except Exception as e:
             logger.warning(f"Could not add S3 policy: {str(e)}")
+        
+        # Add DynamoDB permissions for PersonaTable access
+        dynamodb_policy = {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:DeleteItem",
+                    "dynamodb:Query",
+                    "dynamodb:Scan",
+                    "dynamodb:BatchGetItem",
+                    "dynamodb:BatchWriteItem",
+                    "dynamodb:DescribeTable"
+                ],
+                "Resource": [
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/PersonaTable",
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/PersonaTable/*"
+                ]
+            }]
+        }
+        
+        try:
+            iam_client.put_role_policy(
+                RoleName=role_name,
+                PolicyName="AgentCoreDynamoDBAccess",
+                PolicyDocument=json.dumps(dynamodb_policy)
+            )
+            logger.info("Added DynamoDB permissions to role")
+        except Exception as e:
+            logger.warning(f"Could not add DynamoDB policy: {str(e)}")
     
     # Wait for IAM to propagate
     logger.info("Waiting 10 seconds for IAM to propagate...")

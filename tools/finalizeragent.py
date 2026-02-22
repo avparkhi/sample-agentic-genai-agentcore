@@ -8,36 +8,7 @@ from strands.models import BedrockModel
 from strands import tool
 from utils.s3 import read_text_from_s3, write_text_to_s3
 from utils.persona_store import get_current_persona_id
-
-def get_current_campaign_id():
-    """Get the current campaign ID from agent"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        # Import using importlib to avoid lambda keyword conflict
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
-        agent_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(agent_module)
-        return agent_module.get_current_campaign_id()
-    except:
-        return None
-
-def get_bucket_name():
-    """Get the bucket name from agent"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        # Import using importlib to avoid lambda keyword conflict
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("agent", os.path.join(os.path.dirname(os.path.dirname(__file__)), "agent.py"))
-        agent_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(agent_module)
-        return agent_module.get_bucket_name()
-    except:
-        return None
+from utils.payload_store import get_campaign_id, get_bucket_name
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -263,14 +234,17 @@ Provide your comprehensive synthesis following the structured format specified i
             }
 
         # Retrieve persona_id from in-memory store
+        #persona_id = get_persona_id()
+        # Retrieve persona_id from in-memory store
         persona_id = get_current_persona_id()
-        
+
         # Save final report to S3 if persona_id is available
         if persona_id:
             try:
-                bucket_name = get_bucket_name() or os.getenv("CAMPAIGN_BUCKET")
+                bucket_name = get_bucket_name()
+                logger.info(f"Bucket name in finalizer: {bucket_name}")
                 if bucket_name:
-                    current_campaign_id = campaign_id or get_current_campaign_id()
+                    current_campaign_id = campaign_id or get_campaign_id()
                     if current_campaign_id:
                         final_s3_key = f"campaigns/{current_campaign_id}/reviews/{persona_id}/final_campaign.md"
                     else:
