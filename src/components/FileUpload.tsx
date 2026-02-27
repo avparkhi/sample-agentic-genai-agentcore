@@ -1,6 +1,6 @@
 import { useDropzone } from 'react-dropzone';
 import { useReviewStore } from '../store/reviewStore';
-import { uploadFileToS3, callAgentAPI, fetchReviews } from '../services/s3';
+import { uploadFileToS3, callAgentAPI, fetchReviews, getS3BucketName } from '../services/s3';
 import { useEffect, useRef } from 'react';
 
 export function FileUpload() {
@@ -76,7 +76,8 @@ export function FileUpload() {
       setAgentStatus('processing');
       setAgentError(null);
       
-      const agentResponse = await callAgentAPI(campaignId, uploadResult.key);
+      const bucketName = getS3BucketName();
+      const agentResponse = await callAgentAPI(campaignId, uploadResult.key, bucketName);
       
       if (!agentResponse.success) {
         throw new Error(agentResponse.error || 'Agent processing failed');
