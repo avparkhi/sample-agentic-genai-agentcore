@@ -214,8 +214,14 @@ Resources:
           S3_BUCKET: !Ref UnifiedBucket
           S3_REGION: !Ref AWS::Region
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref UnifiedBucket
+        - Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub 'arn:aws:s3:::${UnifiedBucket}'
+              - !Sub 'arn:aws:s3:::${UnifiedBucket}/*'
       Events:
         GetReviews:
           Type: HttpApi
@@ -223,14 +229,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /reviews
             Method: GET
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: true
-        Target: "es2020"
-        Format: esm
-        EntryPoints: 
-          - index.mjs
 
   # Health Check Lambda Function
   HealthFunction:

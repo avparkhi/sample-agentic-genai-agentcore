@@ -104,6 +104,9 @@ export const handler = async (event) => {
     };
   } catch (error) {
     console.error('Error fetching reviews:', error);
+    console.error('Error stack:', error.stack);
+    console.error('S3_BUCKET env:', process.env.S3_BUCKET);
+    console.error('S3_REGION env:', process.env.S3_REGION);
     return {
       statusCode: 500,
       headers: {
@@ -113,6 +116,9 @@ export const handler = async (event) => {
       body: JSON.stringify({
         success: false,
         error: error.message || 'Unknown error fetching reviews',
+        errorType: error.name,
+        bucket: process.env.S3_BUCKET,
+        region: process.env.S3_REGION,
       }),
     };
   }
