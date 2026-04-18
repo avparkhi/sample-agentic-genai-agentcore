@@ -13,17 +13,20 @@ command -v npm >/dev/null 2>&1 || { echo "❌ npm is required but not installed.
 # Get stack name from argument or use default
 STACK_NAME=${1:-unified-campaign-review}
 
+# Get AWS region from argument, environment, or use default
+AWS_REGION=${2:-${AWS_DEFAULT_REGION:-us-west-2}}
+
 echo "📦 Building SAM application..."
 sam build
 
 echo "🏗️ Deploying infrastructure..."
-sam deploy --stack-name $STACK_NAME --capabilities CAPABILITY_IAM --resolve-s3 --no-confirm-changeset
+sam deploy --stack-name $STACK_NAME --region $AWS_REGION --capabilities CAPABILITY_IAM --resolve-s3 --no-confirm-changeset
 
 echo "📊 Getting stack outputs..."
-API_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' --output text)
-AGENT_API_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`CampaignOrchestratorApi`].OutputValue' --output text)
-FRONTEND_BUCKET=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`FrontendBucket`].OutputValue' --output text)
-CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontURL`].OutputValue' --output text)
+API_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' --output text)
+AGENT_API_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION --query 'Stacks[0].Outputs[?OutputKey==`CampaignOrchestratorApi`].OutputValue' --output text)
+FRONTEND_BUCKET=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION --query 'Stacks[0].Outputs[?OutputKey==`FrontendBucket`].OutputValue' --output text)
+CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontURL`].OutputValue' --output text)
 
 echo "🔧 Configuring frontend environment..."
 cat > .env << EOF
