@@ -34,3 +34,5 @@ __pycache__/
 # Logs
 *.log
 npm-debug.log*
+.kiro/
+.apex/build-agent/

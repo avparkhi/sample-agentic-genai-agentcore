@@ -1,0 +1,62 @@
+{
+  "artifactSources": {
+    "test-execution": {
+      "sourceType": "existing",
+      "path": "c:\\blogpost-agentictransformations\\aws-genai-human-review-langraph"
+    }
+  },
+  "telemetry": {
+    "lastWorkflowStatus": {
+      "spec-generation": {
+        "task_statuses": {
+          "0": {
+            "status": "not_started",
+            "name": "Session Management"
+          },
+          "1": {
+            "status": "not_started",
+            "name": "Project Analysis"
+          },
+          "2": {
+            "status": "not_started",
+            "name": "Requirements Generation"
+          },
+          "3": {
+            "status": "not_started",
+            "name": "Architecture Generation"
+          },
+          "4": {
+            "status": "not_started",
+            "name": "Security Assessment"
+          },
+          "5": {
+            "status": "not_started",
+            "name": "Documentation Generation"
+          },
+          "6": {
+            "status": "not_started",
+            "name": "Output Organization"
+          }
+        },
+        "last_sent": "2026-04-17T20:30:09.007Z"
+      },
+      "coding": {
+        "task_statuses": {
+          "0": {
+            "status": "not_started",
+            "name": "Input Validation & Implementation Planning"
+          },
+          "1": {
+            "status": "not_started",
+            "name": "Load Implementation Tasks"
+          },
+          "2": {
+            "status": "not_started",
+            "name": "Project Setup"
+          }
+        },
+        "last_sent": "2026-04-17T20:30:09.180Z"
+      }
+    }
+  }
+}

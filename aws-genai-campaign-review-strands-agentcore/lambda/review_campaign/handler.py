@@ -25,7 +25,6 @@ def invoke_agentcore(agent_arn, payload):
     logger.info(f"Invoking AgentCore: {agent_arn}")
     response = agentcore.invoke_agent_runtime(
         agentRuntimeArn=agent_arn,
-        qualifier="DEFAULT",
         payload=json.dumps(payload)
     )
 
